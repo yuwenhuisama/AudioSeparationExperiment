@@ -4,8 +4,8 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Sat May 05 2018
-Modified By: huisama
+Last Modified: Sunday May 6th 2018 12:58:23 am
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -30,21 +30,9 @@ class Database(object):
         self.subset = subset
         self.segment_length = segment_length
         self.raw_tracks = mus.load_mus_tracks(subsets=self.subset)
-        self.mixture = self.get_mixture_data()
-        self.vocals = self.get_vocal_data()
-        self.accompaniment = self.get_accompaniment_data()
 
-    def get_mixture_data(self):
-        result = self._split([track.audio for track in self.raw_tracks])
-        return result
-
-    def get_vocal_data(self):
-        result = self._split([track.targets['vocals'].audio for track in self.raw_tracks])
-        return result        
-
-    def get_accompaniment_data(self):
-        result = self._split([track.targets['accompaniment'].audio for track in self.raw_tracks])
-        return result
+        self.batch_index = 0
+        self.batch_size = 2
 
     def _split(self, data):
         list = []
@@ -56,15 +44,15 @@ class Database(object):
     def _generate_batch_data(self, data, flatten=False):
         result = []
 
-
         if flatten:
             # if flatten:
             # sfft_seg = np.reshape(sfft_seg, (-1,))
+            song_result = [[] for _ in range(SAMPLE_LEN)]            
             for song in data:
-                song_result = [[] for _ in range(SAMPLE_LEN)]
                 for seg in song:
                     sfft_left, sfft_right = DataOperation.stft(seg)
-                    sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
+                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
+                    sfft = np.stack((sfft_left.real, sfft_right.real))                    
                     sfft = np.transpose(sfft, (1, 0, 2))
                     sfft = np.reshape(sfft, (SAMPLE_LEN, -1))
 
@@ -73,14 +61,15 @@ class Database(object):
                         song_result[index].append(sfft_seg)
                         index += 1
                 # Todo: change to all songs
-                result = song_result
+            result = song_result
 
         else:
+            song_result = [[] for _ in range(SAMPLE_LEN)]            
             for song in data:
-                song_result = [[] for _ in range(SAMPLE_LEN)]
                 for seg in song:
                     sfft_left, sfft_right = DataOperation.stft(seg)
-                    sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
+                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
+                    sfft = np.stack((sfft_left.real, sfft_right.real))
                     sfft = np.transpose(sfft, (1, 0, 2))
 
                     index = 0
@@ -90,20 +79,35 @@ class Database(object):
                         index += 1
 
                 # Todo: change to all songs
-                result = song_result
-                
+            result = song_result
+            
         for i in range(len(result)):
             result[i] = np.array(result[i])
 
         return result
 
-    def generate_batch_data(self):
-        mixture = self._generate_batch_data(self.mixture)
-        vocal = self._generate_batch_data(self.vocals, True)
-        accompaniment = self._generate_batch_data(self.accompaniment, True)
+    def _get_batch_data(self):
+        batch_tracks = self.raw_tracks[self.batch_index: self.batch_index+self.batch_size]
+        print("\nBatch index from %s to %s\n" % (self.batch_index, self.batch_index+2))
+                
+        self.batch_index += self.batch_size
 
-        return mixture, vocal, accompaniment
-        
+        self.batch_index %= len(self.raw_tracks)
+
+        mixture = self._split([track.audio for track in batch_tracks])
+        vocals = self._split([track.targets['vocals'].audio for track in batch_tracks])
+        accompaniment = self._split([track.targets['accompaniment'].audio for track in batch_tracks])
+
+        return mixture, vocals, accompaniment
+
+    def generate_batch_data(self):
+        mixture, vocals, accompaniment = self._get_batch_data()
+
+        mixture = self._generate_batch_data(mixture)
+        vocals = self._generate_batch_data(vocals, True)
+        accompaniment = self._generate_batch_data(accompaniment, True)
+
+        return mixture, vocals, accompaniment
 
 class DataOperation:
     @classmethod
@@ -128,5 +132,5 @@ class DataOperation:
     def istft(cls, sfft_left, sfft_right):
         pass
 
-# db = Database("sample")
+# db = Database("train")
 # db.generate_batch_data()
