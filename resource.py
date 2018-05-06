@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Monday May 7th 2018 12:06:26 am
+Last Modified: Monday May 7th 2018 12:26:02 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -22,7 +22,7 @@ SOURCE_SEG_LEN = 4410
 SFFT_LEN = 441
 SAMPLE_LEN = SOURCE_SEG_LEN // SFFT_LEN
 SFFT_BIN = 1024
-# BATCH_SIZE = SAMPLE_LEN * 10
+BATCH_SIZE = 4
 
 class Database(object):
     '''
@@ -44,48 +44,42 @@ class Database(object):
         return list
 
     def _generate_batch_data(self, data, flatten=False):
-        result = []
-
         if flatten:
-            # if flatten:
-            # sfft_seg = np.reshape(sfft_seg, (-1,))
-            song_result = [[] for _ in range(SAMPLE_LEN)]            
-            for song in data:
-                for seg in song:
-                    sfft_left, sfft_right = DataOperation.stft(seg)
-                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
-                    sfft = np.stack((sfft_left.real, sfft_right.real))                    
-                    sfft = np.transpose(sfft, (1, 0, 2))
-                    sfft = np.reshape(sfft, (SAMPLE_LEN, -1))
-
-                    index = 0
-                    for sfft_seg in sfft:
-                        song_result[index].append(sfft_seg)
-                        index += 1
-            result = song_result
-
-        else:
-            song_result = [[] for _ in range(SAMPLE_LEN)]            
+            result = []
             for song in data:
                 for seg in song:
                     sfft_left, sfft_right = DataOperation.stft(seg)
                     # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
                     sfft = np.stack((sfft_left.real, sfft_right.real))
                     sfft = np.transpose(sfft, (1, 0, 2))
+                    sfft = np.reshape(sfft, (SAMPLE_LEN, -1))
 
-                    index = 0
-                    for sfft_seg in sfft:
-                        sfft_seg = sfft_seg[:, :, np.newaxis]
-                        song_result[index].append(sfft_seg)
-                        index += 1
+                    result.append(sfft)
+            combined_arr = []
+            for i in range(len(result) // BATCH_SIZE):
+                comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
+                comb = np.reshape(comb, (-1, 2048))
+                combined_arr.append(comb)
+            return combined_arr
 
-                # Todo: change to all songs
-            result = song_result
-            
-        for i in range(len(result)):
-            result[i] = np.array(result[i])
-
-        return result
+        else:
+            result = []
+            for song in data:
+                for seg in song:
+                    sfft_left, sfft_right = DataOperation.stft(seg)
+                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
+                    sfft = np.stack((sfft_left.real, sfft_right.real))
+                    sfft = np.transpose(sfft, (1, 0, 2))
+                    
+                    # for sfft_seg in sfft:
+                    #     sfft_seg = sfft_seg[:, :, np.newaxis]
+                    result.append(sfft)
+            combined_arr = []
+            for i in range(len(result) // BATCH_SIZE):
+                comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
+                comb = np.reshape(comb, (-1, 64, 32))
+                combined_arr.append(comb)
+            return combined_arr
 
     def _pad_array(self, array):
         zero_count = self.segment_length * (math.ceil(array.shape[0] / self.segment_length)) - array.shape[0]
