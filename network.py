@@ -3,7 +3,7 @@ File: /network.py
 Created Date: Thursday January 1st 1970
 Author: huisama
 -----
-Last Modified: Sunday May 6th 2018 1:18:43 am
+Last Modified: Sunday May 6th 2018 3:04:12 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -141,8 +141,12 @@ class NetWork:
             vocals.extend(accompaniment)
             self.model.fit(x=mixture,
                         y=vocals,
-                        epochs=8,
-                        batch_size=32)
+                        epochs=4,
+                        batch_size=32,
+                        validation_split=0.1)
+            del mixture
+            del vocals
+            del accompaniment
 
     def predict(self):
         pass
