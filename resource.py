@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Sunday May 6th 2018 12:58:23 am
+Last Modified: Monday May 7th 2018 12:06:26 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -13,6 +13,7 @@ Copyright (c) 2018 Hui
 import numpy as np
 import musdb
 import wave
+import math
 from scipy.io.wavfile import write
 
 mus = musdb.DB(root_dir="./musdb18")
@@ -21,6 +22,7 @@ SOURCE_SEG_LEN = 4410
 SFFT_LEN = 441
 SAMPLE_LEN = SOURCE_SEG_LEN // SFFT_LEN
 SFFT_BIN = 1024
+# BATCH_SIZE = SAMPLE_LEN * 10
 
 class Database(object):
     '''
@@ -60,7 +62,6 @@ class Database(object):
                     for sfft_seg in sfft:
                         song_result[index].append(sfft_seg)
                         index += 1
-                # Todo: change to all songs
             result = song_result
 
         else:
@@ -86,6 +87,12 @@ class Database(object):
 
         return result
 
+    def _pad_array(self, array):
+        zero_count = self.segment_length * (math.ceil(array.shape[0] / self.segment_length)) - array.shape[0]
+        result = np.pad(array, ((0, zero_count), (0, 0)), 'constant')
+        # print(result.shape)
+        return result
+
     def _get_batch_data(self):
         batch_tracks = self.raw_tracks[self.batch_index: self.batch_index+self.batch_size]
         print("\nBatch index from %s to %s\n" % (self.batch_index, self.batch_index+2))
@@ -94,20 +101,20 @@ class Database(object):
 
         self.batch_index %= len(self.raw_tracks)
 
-        mixture = self._split([track.audio for track in batch_tracks])
-        vocals = self._split([track.targets['vocals'].audio for track in batch_tracks])
-        accompaniment = self._split([track.targets['accompaniment'].audio for track in batch_tracks])
+        mixture = self._split([self._pad_array(track.audio) for track in batch_tracks])
+        vocals = self._split([self._pad_array(track.targets['vocals'].audio) for track in batch_tracks])
+        accompaniment = self._split([self._pad_array(track.targets['accompaniment'].audio) for track in batch_tracks])
 
         return mixture, vocals, accompaniment
 
     def generate_batch_data(self):
         mixture, vocals, accompaniment = self._get_batch_data()
 
-        mixture = self._generate_batch_data(mixture)
-        vocals = self._generate_batch_data(vocals, True)
-        accompaniment = self._generate_batch_data(accompaniment, True)
+        new_mixture = self._generate_batch_data(mixture)
+        new_vocals = self._generate_batch_data(vocals, True)
+        new_accompaniment = self._generate_batch_data(accompaniment, True)
 
-        return mixture, vocals, accompaniment
+        return new_mixture, new_vocals, new_accompaniment
 
 class DataOperation:
     @classmethod
@@ -132,5 +139,5 @@ class DataOperation:
     def istft(cls, sfft_left, sfft_right):
         pass
 
-# db = Database("train")
-# db.generate_batch_data()
+db = Database("train")
+db.generate_batch_data()

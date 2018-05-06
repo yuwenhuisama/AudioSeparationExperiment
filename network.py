@@ -3,14 +3,14 @@ File: /network.py
 Created Date: Thursday January 1st 1970
 Author: huisama
 -----
-Last Modified: Sunday May 6th 2018 3:04:12 pm
+Last Modified: Sunday May 6th 2018 11:06:48 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
 
 from keras.models import Model
-from keras.layers import Input, Dense, Conv2D, Flatten, Layer, Reshape, Conv2DTranspose, Concatenate, LSTM, LeakyReLU, BatchNormalization
+from keras.layers import Input, Dense, Conv2D, Flatten, Layer, Reshape, Conv2DTranspose, Concatenate, LSTM, LeakyReLU, BatchNormalization, Dropout
 from keras.optimizers import Adagrad, RMSprop
 import keras.backend as K
 
@@ -39,16 +39,19 @@ class NetWork:
         # conv = Conv2D(kernel_size=(4, 4), strides=(4, 4), filters=64, padding='same')(conv)
 
         input = Input((2, self.sfft_len, 1))
-        bn = BatchNormalization()(input)
+        res = Reshape((64, 32, 1))(input)        
+        bn = BatchNormalization()(res)
         conv = Conv2D(kernel_size=(1, 1), filters=16, padding='same')(bn)
-        conv = Conv2D(kernel_size=(2, 1), strides=(2, 1), filters=32, padding='same')(conv)
+        conv = Conv2D(kernel_size=(2, 2), strides=(1, 1), filters=32, padding='same')(conv)
         conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=32, padding='same')(conv)
-        conv = Conv2D(kernel_size=(2, 2), strides=(2, 4), filters=64, padding='same')(conv)
+        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=64, padding='same')(conv)
+        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=64, padding='same')(conv)
 
         flt = Flatten()(conv)
         fcn = LeakyReLU()(Dense(units=1024)(flt))
         fcn = LeakyReLU()(Dense(units=512)(fcn))
-        bn = BatchNormalization()(fcn)
+        dp = Dropout(0.25)(fcn)
+        bn = BatchNormalization()(dp)
         # fcn = Dense(units=256, activation='relu')(fcn)
         
         shared_encoder_model = Model(input, bn)
@@ -76,7 +79,7 @@ class NetWork:
         d1 = Dense(units=1024)
         fcn_decoded = [BatchNormalization()(LeakyReLU()(d1(layer))) for layer in merged_auxes]
         d2 = Dense(units=2048)
-        fcn_decoded = [LeakyReLU()(d2(layer)) for layer in fcn_decoded]
+        fcn_decoded = [Dropout(0.25)(LeakyReLU()(d2(layer))) for layer in fcn_decoded]
         # bn = BatchNormalization()(fcn_decoded)
         # d3 = Dense(units=4096)
         # fcn_decoded = [d3(layer) for layer in fcn_decoded]
@@ -85,7 +88,7 @@ class NetWork:
         inputs_tmp.extend(seperate_inputs)
         inputs_tmp.extend(aux_inputs)
         seperate_model_acc = Model(inputs=inputs_tmp, outputs=fcn_decoded, name='acc_output')
-        seperate_model_voc = Model(inputs=inputs_tmp, outputs=fcn_decoded, name='voc_output')        
+        seperate_model_voc = Model(inputs=inputs_tmp, outputs=fcn_decoded, name='voc_output')
 
         return seperate_model_acc, seperate_model_voc
 
@@ -98,7 +101,7 @@ class NetWork:
         seperate_model_acc, seperate_model_voc = self.get_separate_layer()
 
         # orgin inputs
-        inputs = [Input((2, self.sfft_len, 1), name='org_input_%s' % i) for i in range(self.sample_len)]
+        inputs = [Input((2, self.sfft_len, 1)) for i in range(self.sample_len)]
         inputs_reshape = [Reshape((-1,))(input) for input in inputs]
         encoded = [shared_encoder_model(input) for input in inputs]
 
@@ -121,11 +124,11 @@ class NetWork:
         model.compile(
             optimizer=Adagrad(),
             loss={
-                'acc_output': 'mean_squared_error',
-                'voc_output': 'mean_squared_error'
+                'acc_output': 'cosine_proximity',
+                'voc_output': 'cosine_proximity'
             },
             loss_weights={
-                'acc_output': 0.5,
+                'acc_output': 1.0,
                 'voc_output': 1.0
             },
         )
@@ -142,8 +145,7 @@ class NetWork:
             self.model.fit(x=mixture,
                         y=vocals,
                         epochs=4,
-                        batch_size=32,
-                        validation_split=0.1)
+                        batch_size=32)
             del mixture
             del vocals
             del accompaniment
@@ -154,7 +156,7 @@ class NetWork:
 '''
     Test
 '''
-database = Database('train')
+database = Database('sample')
 
 nn = NetWork(SAMPLE_LEN, SFFT_BIN)
 nn.build_model()
