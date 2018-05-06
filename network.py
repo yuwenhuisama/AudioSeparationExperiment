@@ -3,7 +3,7 @@ File: /network.py
 Created Date: Thursday January 1st 1970
 Author: huisama
 -----
-Last Modified: Sunday May 6th 2018 11:06:48 pm
+Last Modified: Monday May 7th 2018 1:40:18 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -38,57 +38,41 @@ class NetWork:
         # conv = Conv2D(kernel_size=(4, 4), strides=(2, 2), filters=32, padding='same')(conv)
         # conv = Conv2D(kernel_size=(4, 4), strides=(4, 4), filters=64, padding='same')(conv)
 
-        input = Input((2, self.sfft_len, 1))
-        res = Reshape((64, 32, 1))(input)        
-        bn = BatchNormalization()(res)
-        conv = Conv2D(kernel_size=(1, 1), filters=16, padding='same')(bn)
-        conv = Conv2D(kernel_size=(2, 2), strides=(1, 1), filters=32, padding='same')(conv)
-        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=32, padding='same')(conv)
-        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=64, padding='same')(conv)
-        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=64, padding='same')(conv)
+        input = Input((40, 16, 8))
+        bn = BatchNormalization()(input)
+        conv = Conv2D(kernel_size=(1, 1), filters=16, padding='same', data_format='channels_first')(bn)
+        conv = Conv2D(kernel_size=(2, 2), strides=(1, 1), filters=32, padding='same', data_format='channels_first')(conv)
+        conv = Conv2D(kernel_size=(2, 2), strides=(1, 1), filters=64, padding='same', data_format='channels_first')(conv)
+        conv = Conv2D(kernel_size=(2, 2), strides=(2, 2), filters=64, padding='same', data_format='channels_first')(conv)
+        conv = Conv2D(kernel_size=(1, 1), strides=(1, 1), filters=40, padding='same', data_format='channels_first')(conv)
 
         flt = Flatten()(conv)
-        fcn = LeakyReLU()(Dense(units=1024)(flt))
-        fcn = LeakyReLU()(Dense(units=512)(fcn))
-        dp = Dropout(0.25)(fcn)
-        bn = BatchNormalization()(dp)
+        # fcn = LeakyReLU()(Dense(units=1024)(flt))
+        # fcn = LeakyReLU()(Dense(units=512)(fcn))
+        # dp = Dropout(0.25)(fcn)
+        bn = BatchNormalization()(flt)
         # fcn = Dense(units=256, activation='relu')(fcn)
         
         shared_encoder_model = Model(input, bn)
         return shared_encoder_model
 
     def get_separate_layer(self):
-        seperate_inputs = [Input((512,)) for _ in range(self.sample_len)]
+        seperate_inputs = Input((40, 32))
 
-        aux_inputs = [Input((2048,)) for _ in range(self.sample_len)]
-
-        merged_x = Concatenate(1)([BatchNormalization()(layer) for layer in seperate_inputs])
-        merged_x = Reshape((-1, 512))(merged_x)
-        self_attention = Attention(8, 256)([merged_x, merged_x, merged_x])
+        merged_x = seperate_inputs
+        self_attention = Attention(8, 32)([merged_x, merged_x, merged_x])
         # self_attention_flat = Flatten()(self_attention)
 
-        lstm = LSTM(2048)(self_attention)
+        lstm = LSTM(1024)(self_attention)
         # self_attention_flat = Flatten()(lstm)
 
-        # self._print_layer_shape(self_attention) 
-
-        merged_auxes = [Concatenate(1)
-                ([lstm, BatchNormalization()(aux_inputs[i])]) for i in range(self.sample_len)]
-        # self._print_layer_shape(merged_auxes[0])
-
         d1 = Dense(units=1024)
-        fcn_decoded = [BatchNormalization()(LeakyReLU()(d1(layer))) for layer in merged_auxes]
+        fcn_decoded = BatchNormalization()(LeakyReLU()(d1(lstm)))
         d2 = Dense(units=2048)
-        fcn_decoded = [Dropout(0.25)(LeakyReLU()(d2(layer))) for layer in fcn_decoded]
-        # bn = BatchNormalization()(fcn_decoded)
-        # d3 = Dense(units=4096)
-        # fcn_decoded = [d3(layer) for layer in fcn_decoded]
-        
-        inputs_tmp = []
-        inputs_tmp.extend(seperate_inputs)
-        inputs_tmp.extend(aux_inputs)
-        seperate_model_acc = Model(inputs=inputs_tmp, outputs=fcn_decoded, name='acc_output')
-        seperate_model_voc = Model(inputs=inputs_tmp, outputs=fcn_decoded, name='voc_output')
+        fcn_decoded = LeakyReLU()(d2(fcn_decoded))
+        d3 = Dense(units=5120)
+        seperate_model_acc = Model(inputs=seperate_inputs, outputs=d3(fcn_decoded), name='acc_output')
+        seperate_model_voc = Model(inputs=seperate_inputs, outputs=d3(fcn_decoded), name='voc_output')
 
         return seperate_model_acc, seperate_model_voc
 
@@ -101,36 +85,41 @@ class NetWork:
         seperate_model_acc, seperate_model_voc = self.get_separate_layer()
 
         # orgin inputs
-        inputs = [Input((2, self.sfft_len, 1)) for i in range(self.sample_len)]
-        inputs_reshape = [Reshape((-1,))(input) for input in inputs]
-        encoded = [shared_encoder_model(input) for input in inputs]
+        inputs = Input((40, 16, 8))
+        #inputs_reshape = [Reshape((-1,))(input) for input in inputs]
+        encoded = shared_encoder_model(inputs)
 
         # output
-        inputs_tmp = []
-        inputs_tmp.extend(encoded)
-        inputs_tmp.extend(inputs_reshape)
-        output_acc = seperate_model_acc(inputs_tmp)
-        output_voc = seperate_model_voc(inputs_tmp)
+        encoded = Reshape((40, -1))(encoded)
+        output_acc = seperate_model_acc(encoded)
+        output_voc = seperate_model_voc(encoded)
 
         # compile model
-        outputs_tmp = []
-        outputs_tmp.extend(output_acc)
-        outputs_tmp.extend(output_voc)
+        # outputs_tmp = []
+        # outputs_tmp.extend(output_acc)
+        # outputs_tmp.extend(output_voc)
 
-        model = Model(inputs=inputs, outputs=outputs_tmp)
+        model = Model(inputs=inputs, outputs=[output_acc, output_voc])
         
         # out = model.predict([np.random.random((1, 4, self.sfft_len, 1)) for i in range(10)])
+
+        def costume_acc(y_true, y_pred):
+            return K.mean(K.abs(y_true - y_pred))
 
         model.compile(
             optimizer=Adagrad(),
             loss={
-                'acc_output': 'cosine_proximity',
-                'voc_output': 'cosine_proximity'
+                'acc_output': 'mean_squared_error',
+                'voc_output': 'mean_squared_error'
             },
             loss_weights={
                 'acc_output': 1.0,
                 'voc_output': 1.0
             },
+            metrics={
+                'acc_output': costume_acc,
+                'voc_output': costume_acc
+            }
         )
 
         self.model = model
@@ -141,14 +130,17 @@ class NetWork:
     def train(self, database):
         for _ in range(50):
             mixture, vocals, accompaniment = database.generate_batch_data()
-            vocals.extend(accompaniment)
-            self.model.fit(x=mixture,
-                        y=vocals,
-                        epochs=4,
+            y = [np.array(vocals), np.array(accompaniment)]
+            self.model.fit(x=np.array(mixture),
+                        y=y,
+                        epochs=8,
                         batch_size=32)
             del mixture
             del vocals
             del accompaniment
+
+            self.model.save('./model/model_%s.ckpt' % _)
+
 
     def predict(self):
         pass
@@ -156,7 +148,7 @@ class NetWork:
 '''
     Test
 '''
-database = Database('sample')
+database = Database('train')
 
 nn = NetWork(SAMPLE_LEN, SFFT_BIN)
 nn.build_model()

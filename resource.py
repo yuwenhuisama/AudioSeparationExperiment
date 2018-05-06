@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Monday May 7th 2018 12:26:02 am
+Last Modified: Monday May 7th 2018 1:38:45 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -21,7 +21,7 @@ mus = musdb.DB(root_dir="./musdb18")
 SOURCE_SEG_LEN = 4410
 SFFT_LEN = 441
 SAMPLE_LEN = SOURCE_SEG_LEN // SFFT_LEN
-SFFT_BIN = 1024
+SFFT_BIN = 64
 BATCH_SIZE = 4
 
 class Database(object):
@@ -58,7 +58,7 @@ class Database(object):
             combined_arr = []
             for i in range(len(result) // BATCH_SIZE):
                 comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
-                comb = np.reshape(comb, (-1, 2048))
+                comb = np.reshape(comb, (-1,))
                 combined_arr.append(comb)
             return combined_arr
 
@@ -67,17 +67,14 @@ class Database(object):
             for song in data:
                 for seg in song:
                     sfft_left, sfft_right = DataOperation.stft(seg)
-                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
                     sfft = np.stack((sfft_left.real, sfft_right.real))
                     sfft = np.transpose(sfft, (1, 0, 2))
                     
-                    # for sfft_seg in sfft:
-                    #     sfft_seg = sfft_seg[:, :, np.newaxis]
                     result.append(sfft)
             combined_arr = []
             for i in range(len(result) // BATCH_SIZE):
                 comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
-                comb = np.reshape(comb, (-1, 64, 32))
+                comb = np.reshape(comb, (-1, 16, 8))
                 combined_arr.append(comb)
             return combined_arr
 
@@ -107,6 +104,10 @@ class Database(object):
         new_mixture = self._generate_batch_data(mixture)
         new_vocals = self._generate_batch_data(vocals, True)
         new_accompaniment = self._generate_batch_data(accompaniment, True)
+
+        del mixture
+        del vocals
+        del accompaniment
 
         return new_mixture, new_vocals, new_accompaniment
 
