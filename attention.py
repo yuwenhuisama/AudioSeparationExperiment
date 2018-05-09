@@ -3,8 +3,8 @@ File: /self_attention.py
 Created Date: Friday May 4th 2018
 Author: huisama
 -----
-Last Modified: Fri May 04 2018
-Modified By: huisama
+Last Modified: Thursday May 10th 2018 12:00:33 am
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''

@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Monday May 7th 2018 1:38:45 am
+Last Modified: Wednesday May 9th 2018 1:43:37 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -15,124 +15,116 @@ import musdb
 import wave
 import math
 from scipy.io.wavfile import write
+from scipy.signal import stft, istft
+import matplotlib.pyplot as plt
 
 mus = musdb.DB(root_dir="./musdb18")
 
-SOURCE_SEG_LEN = 4410
-SFFT_LEN = 441
-SAMPLE_LEN = SOURCE_SEG_LEN // SFFT_LEN
-SFFT_BIN = 64
-BATCH_SIZE = 4
+BATCH_SIZE = 32
+BATCH_SONG_SIZE = 1
+FRN_SAMPLE = 256
+FRN_BIN = FRN_SAMPLE // 2 + 1
 
 class Database(object):
     '''
         Database class to provide formatted audio data for training
     '''
-    def __init__(self, subset, segment_length=SOURCE_SEG_LEN):
+    def __init__(self, subset):
         self.subset = subset
-        self.segment_length = segment_length
         self.raw_tracks = mus.load_mus_tracks(subsets=self.subset)
 
         self.batch_index = 0
-        self.batch_size = 2
+        self.batch_size = BATCH_SONG_SIZE
 
-    def _split(self, data):
-        list = []
-        for t in data:
-            result = np.array_split(t, t.shape[0] / self.segment_length)
-            list.append(result)
-        return list
+    def _generate_padding_data(self, data):
+        # pad zero array
+        data = np.transpose(data, (1, 0))
 
-    def _generate_batch_data(self, data, flatten=False):
-        if flatten:
-            result = []
-            for song in data:
-                for seg in song:
-                    sfft_left, sfft_right = DataOperation.stft(seg)
-                    # sfft = np.stack((sfft_left.real, sfft_left.imag, sfft_right.real, sfft_right.imag))
-                    sfft = np.stack((sfft_left.real, sfft_right.real))
-                    sfft = np.transpose(sfft, (1, 0, 2))
-                    sfft = np.reshape(sfft, (SAMPLE_LEN, -1))
+        points = data.shape[0]
+        remain = BATCH_SIZE * math.ceil((points / BATCH_SIZE)) - points
 
-                    result.append(sfft)
-            combined_arr = []
-            for i in range(len(result) // BATCH_SIZE):
-                comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
-                comb = np.reshape(comb, (-1,))
-                combined_arr.append(comb)
-            return combined_arr
+        if remain == 0:
+            return data
+        remain_arr = np.zeros((remain, data.shape[1]))
+        data = np.concatenate((data, remain_arr))
+        return data
 
-        else:
-            result = []
-            for song in data:
-                for seg in song:
-                    sfft_left, sfft_right = DataOperation.stft(seg)
-                    sfft = np.stack((sfft_left.real, sfft_right.real))
-                    sfft = np.transpose(sfft, (1, 0, 2))
-                    
-                    result.append(sfft)
-            combined_arr = []
-            for i in range(len(result) // BATCH_SIZE):
-                comb = np.stack(result[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
-                comb = np.reshape(comb, (-1, 16, 8))
-                combined_arr.append(comb)
-            return combined_arr
+    def _generate_data_set_for_nn(self, data):
+        result = []
+        for raw in data:
+            #Do sfft
+            left = raw[:, 0]
+            right = raw[:, 1]
 
-    def _pad_array(self, array):
-        zero_count = self.segment_length * (math.ceil(array.shape[0] / self.segment_length)) - array.shape[0]
-        result = np.pad(array, ((0, zero_count), (0, 0)), 'constant')
-        # print(result.shape)
-        return result
+            _, _, Zxxl = stft(x=left, fs=0.1, nperseg=FRN_SAMPLE)
+            _, _, Zxxr = stft(x=right, fs=0.1, nperseg=FRN_SAMPLE)
 
-    def _get_batch_data(self):
-        batch_tracks = self.raw_tracks[self.batch_index: self.batch_index+self.batch_size]
-        print("\nBatch index from %s to %s\n" % (self.batch_index, self.batch_index+2))
-                
-        self.batch_index += self.batch_size
+            # Padding
+            Zxxl_seq = self._generate_padding_data(Zxxl.real)
+            Zxxr_seq = self._generate_padding_data(Zxxr.real)
 
-        self.batch_index %= len(self.raw_tracks)
+            # Stack
+            stacked = np.stack((Zxxl_seq, Zxxr_seq))
+            stacked = np.transpose(stacked, (1, 0, 2))
 
-        mixture = self._split([self._pad_array(track.audio) for track in batch_tracks])
-        vocals = self._split([self._pad_array(track.targets['vocals'].audio) for track in batch_tracks])
-        accompaniment = self._split([self._pad_array(track.targets['accompaniment'].audio) for track in batch_tracks])
+            # reshape
+            reshaped = np.reshape(stacked, (-1, BATCH_SIZE, 2, stacked.shape[2]))
 
-        return mixture, vocals, accompaniment
+            result.append(reshaped)
+
+        return np.concatenate(result)        
 
     def generate_batch_data(self):
-        mixture, vocals, accompaniment = self._get_batch_data()
+        tracks = self.raw_tracks[self.batch_index:self.batch_index+self.batch_size]
 
-        new_mixture = self._generate_batch_data(mixture)
-        new_vocals = self._generate_batch_data(vocals, True)
-        new_accompaniment = self._generate_batch_data(accompaniment, True)
+        print('From %s to %s' % (self.batch_index, self.batch_index + BATCH_SONG_SIZE - 1))
 
-        del mixture
-        del vocals
-        del accompaniment
+        self.batch_index += BATCH_SONG_SIZE
+        self.batch_index %= 50
 
-        return new_mixture, new_vocals, new_accompaniment
+        mixture = [track.audio for track in tracks]
+        vocals = [track.targets['vocals'].audio for track in tracks]
+        accompaniments = [track.targets['accompaniment'].audio for track in tracks]
+
+        mixture_dataset = self._generate_data_set_for_nn(mixture)
+        vocals_dataset = self._generate_data_set_for_nn(vocals)
+        accompaniments_dataset = self._generate_data_set_for_nn(accompaniments)
+
+        return mixture_dataset, vocals_dataset, accompaniments_dataset
+
+    def generate_one_batch_data_for_test(self, index, flatten = False):
+        mixture = [self.raw_tracks[index].audio]
+        mixture_dataset = self._generate_data_set_for_nn(mixture)
+        # vocals_dataset = self._generate_data_set_for_nn(mixture)
+        # accompaniments_dataset = self._generate_data_set_for_nn(mixture)
+
+        return mixture_dataset #, vocals_dataset, accompaniments_dataset
 
 class DataOperation:
     @classmethod
-    def _split_data(cls, data, duration):
-        result = np.array_split(data, data.shape[0] / duration)
-        return result
+    def data_to_wav(cls, data, filepath):
+        write(filepath, 44100, data)
 
     @classmethod
-    def stft(cls, data, duration=SFFT_LEN):
-        left = data[:, 0]
-        right = data[:, 1]
-
-        sfft_left = [np.fft.fft(seg, SFFT_BIN).real for seg in cls._split_data(left, duration)]
-        sfft_right = [np.fft.fft(seg, SFFT_BIN).real for seg in cls._split_data(right, duration)]
-
-        arrl = np.array(sfft_left)
-        arrr = np.array(sfft_right)
-
-        return arrl, arrr
+    def reformat_data(cls, data):
+        data = np.transpose(data, (2, 3, 0, 1))
+        data = np.reshape(data, (2, FRN_BIN, -1))
+        return data
 
     @classmethod
-    def istft(cls, sfft_left, sfft_right):
-        pass
+    def nn_output_to_wav(cls, data, filepath):
+        result = cls.reformat_data(data)
 
-db = Database("train")
-db.generate_batch_data()
+        left = result[0, :, :]
+        right = result[1, :, :]
+
+        isftslr = istft(Zxx=left, fs=0.1, nperseg=FRN_SAMPLE)
+        isftsrr = istft(Zxx=right, fs=0.1, nperseg=FRN_SAMPLE)
+
+        stacked = np.stack((isftslr[1].real, isftsrr[1].real))
+        stacked = np.transpose(stacked, (1, 0))
+
+        DataOperation.data_to_wav(stacked, filepath)
+
+# db = Database('sample')
+# db.generate_batch_data()
