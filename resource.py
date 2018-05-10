@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Wednesday May 9th 2018 1:43:37 am
+Last Modified: Thursday May 10th 2018 1:23:47 am
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -22,7 +22,7 @@ mus = musdb.DB(root_dir="./musdb18")
 
 BATCH_SIZE = 32
 BATCH_SONG_SIZE = 1
-FRN_SAMPLE = 256
+FRN_SAMPLE = 512
 FRN_BIN = FRN_SAMPLE // 2 + 1
 
 class Database(object):
