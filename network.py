@@ -3,8 +3,8 @@ File: /network.py
 Created Date: Thursday January 1st 1970
 Author: huisama
 -----
-Last Modified: Thursday May 10th 2018 11:31:08 am
-Modified By: Huisama
+Last Modified: Thu May 10 2018
+Modified By: huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -12,7 +12,6 @@ Copyright (c) 2018 Hui
 from keras.models import Model, load_model
 from keras.layers import Input, Dense, Conv2D, Flatten, Layer, Reshape, Conv2DTranspose, Concatenate, LSTM, LeakyReLU, BatchNormalization, Dropout, Lambda, RepeatVector
 from keras.optimizers import Adagrad, Adadelta
-import keras.backend as K
 
 import numpy as np
 
