@@ -3,7 +3,7 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Thu May 10 2018
+Last Modified: Fri May 11 2018
 Modified By: huisama
 -----
 Copyright (c) 2018 Hui
@@ -21,6 +21,15 @@ import math
 class Network:
 
     def do_encoding(self, input):
+        '''
+            do_encoding(self, input)
+
+            parameters:
+            input: tensor of shape (batch_size, 2, frn_bin)
+
+            return:
+                tensor of shape(1024,)
+        '''
         # Input (batch_size, 2, frn_bin)
         bn = tf.layers.batch_normalization(input)
         conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,1), filters=16, padding='same', data_format='channels_first'))
@@ -36,6 +45,15 @@ class Network:
         return output
 
     def do_estimate(self, input):
+        '''
+            do_estimate(self, input)
+
+            parameters:
+            input: tensor of shape (32, 32)
+
+            return:
+                tensor of shape(2 * frn_bin)
+        '''
         # input (32, 32)
         attention = Attention(input, input, input, 8, 8)
         flat = tf.layers.flatten(attention)
@@ -55,6 +73,11 @@ class Network:
         return output
 
     def build_model(self):
+        '''
+            build_model(self)
+
+            build model
+        '''
         self.input = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
         self.acc_src = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
         self.voc_src = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
