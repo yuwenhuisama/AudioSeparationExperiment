@@ -101,3 +101,5 @@ ENV/
 .mypy_cache/
 musdb18/
 model/
+accompaniments.wav
+voice.wav

@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Thursday May 10th 2018 1:23:47 am
+Last Modified: Monday May 14th 2018 9:07:56 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -74,7 +74,9 @@ class Database(object):
 
         return np.concatenate(result)        
 
-    def generate_batch_data(self):
+    def generate_batch_data(self, continue_index=0):
+        self.batch_index = continue_index
+
         tracks = self.raw_tracks[self.batch_index:self.batch_index+self.batch_size]
 
         print('From %s to %s' % (self.batch_index, self.batch_index + BATCH_SONG_SIZE - 1))

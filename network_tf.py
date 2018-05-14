@@ -3,8 +3,8 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Fri May 11 2018
-Modified By: huisama
+Last Modified: Monday May 14th 2018 10:23:11 pm
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -55,12 +55,14 @@ class Network:
                 tensor of shape(2 * frn_bin)
         '''
         # input (32, 32)
-        attention = Attention(input, input, input, 8, 8)
-        flat = tf.layers.flatten(attention)
+        attention = Attention(input, input, input, 8, 64)
+        # print(attention.shape)
+        # flat = tf.layers.flatten(attention)
+        # print(flat.shape)
 
         estm = tf.nn.leaky_relu(
             tf.layers.batch_normalization(
-                tf.layers.dense(flat, units=4096)))
+                tf.layers.dense(attention, units=4096)))
         estm = tf.nn.leaky_relu(
             tf.layers.batch_normalization(
                 tf.layers.dense(estm, units=2048)))
@@ -70,6 +72,8 @@ class Network:
         output = tf.layers.batch_normalization(
                 tf.layers.dense(estm, units=2 * FRN_BIN))
 
+        output = tf.reshape(output, (-1, BATCH_SIZE, 2, FRN_BIN))
+
         return output
 
     def build_model(self):
@@ -78,15 +82,15 @@ class Network:
 
             build model
         '''
-        self.input = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
-        self.acc_src = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
-        self.voc_src = tf.placeholder(dtype=tf.float16, shape=(None, BATCH_SIZE, 2, FRN_BIN))
+        self.input = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
+        self.acc_src = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
+        self.voc_src = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
 
         # encode
         encoded = self.do_encoding(self.input)
 
         # separate
-        encoded = tf.reshape(encoded, shape=(32, -1))
+        encoded = tf.reshape(encoded, shape=(-1, 32, 32))
         estm_acc = self.do_estimate(encoded)
         estm_voc = self.do_estimate(encoded)
 
@@ -94,8 +98,8 @@ class Network:
         tfmask_acc = estm_acc / (estm_acc + estm_voc + np.finfo(float).eps) * self.input
         tfmask_voc = estm_voc / (estm_acc + estm_voc + np.finfo(float).eps) * self.input
 
-        result_acc = tf.reshape(tfmask_acc, (BATCH_SIZE, 2, FRN_BIN))
-        result_voc = tf.reshape(tfmask_voc, (BATCH_SIZE, 2, FRN_BIN))
+        result_acc = tf.reshape(tfmask_acc, (-1, BATCH_SIZE, 2, FRN_BIN))
+        result_voc = tf.reshape(tfmask_voc, (-1, BATCH_SIZE, 2, FRN_BIN))
 
         self.acc = result_acc
         self.voc = result_voc
@@ -103,7 +107,8 @@ class Network:
     def loss(self):
         return tf.reduce_mean(tf.square(self.acc_src - self.acc) + tf.square(self.voc_src - self.voc), name='loss')
 
-    def train(self, database):
+    def train(self, database, continue_index=0):
+        self.build_model()
         loss_fn = self.loss()
         global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
         optimizer = tf.train.AdamOptimizer().minimize(loss_fn, global_step=global_step)
@@ -111,32 +116,44 @@ class Network:
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
 
-            for index in range(25):
-                mixture, vocals, accompaniment = database.generate_batch_data()
+            self.load_state(sess, './model')
+
+            for index in range(50-continue_index):
+                mixture, vocals, accompaniment = database.generate_batch_data(continue_index+index)
 
                 times = math.ceil(len(mixture) / 32)
 
-                for i in range(times):
-                    batch_mixture = np.array(mixture[i*32, (i+1)*32 if (i+1)*32 < len(mixture) else len(mixture)])
-                    batch_voc = np.array(vocals[i*32, (i+1)*32 if (i+1)*32 < len(vocals) else len(vocals)])
-                    batch_acc = np.array(accompaniment[i*32, (i+1)*32 if (i+1)*32 < len(accompaniment) else len(accompaniment)])
+                for j in range(2):
+                    for i in range(times):
+                        batch_mixture = mixture[i*32 : (i+1)*32 if (i+1)*32 < len(mixture) else len(mixture), :, :, :]
+                        batch_voc = vocals[i*32 : (i+1)*32 if (i+1)*32 < len(vocals) else len(vocals), :, :, :]
+                        batch_acc = accompaniment[i*32 : (i+1)*32 if (i+1)*32 < len(accompaniment) else len(accompaniment), :, :, :]
 
-                    loss, _ = sess.run([loss_fn, optimizer], feed_dict={
-                                                            self.acc_src: batch_mixture,
-                                                            self.voc_src: batch_voc,
-                                                            self.input: batch_acc
-                                                        })
+                        loss, _ = sess.run([loss_fn, optimizer], feed_dict={
+                                                                self.acc_src: batch_mixture,
+                                                                self.voc_src: batch_voc,
+                                                                self.input: batch_acc
+                                                            })
 
-                    print("Epoch %s, Batch %s : loss %s: " % (index, i, loss))
+                        print("Turn %s, Epoch %s, Batch %s : loss %s: " % (index, i, j, loss))
+
+                self.save_state(sess, './model', continue_index+index)
+
+    def save_state(self, sess, ckpt_path, global_step):
+        print('Begin saving...')
+        saver = tf.train.Saver()
+        saver.save(sess, ckpt_path + '/checkpoint', global_step=global_step)
+        print('End saving...')
 
     def load_state(self, sess, ckpt_path):
-        ckpt = tf.train.get_checkpoint_state(os.path.dirname(ckpt_path))
+        ckpt = tf.train.get_checkpoint_state(os.path.dirname(ckpt_path + '/checkpoint'))
         if ckpt and ckpt.model_checkpoint_path:
             tf.train.Saver().restore(sess, ckpt.model_checkpoint_path)
 
     def predict_with_model(self, database, model_path):
         self.build_model()
-        data = database.generate_one_batch_data_for_test(0)        
+        data = database.generate_one_batch_data_for_test(0)
+        # global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')  
 
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
@@ -148,9 +165,19 @@ class Network:
 
             times = math.ceil(len(data) / 32)
             for i in range(times):
-                batch_mixture = np.array(data[i*32, (i+1)*32 if (i+1)*32 < len(data) else len(data)])
+                batch_mixture = np.array(data[i*32 : (i+1)*32 if (i+1)*32 < len(data) else len(data), :, :, :])
 
-                voc, acc = sess.run([self.acc, self.voc], feed_dict={self.acc_src: batch_mixture})
+                voc, acc = sess.run([self.acc, self.voc], feed_dict={self.input: batch_mixture})
+
+                if (voc.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - voc.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, 2, FRN_BIN))
+                    voc = np.concatenate((voc, padding))
+
+                if (acc.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - acc.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, 2, FRN_BIN))
+                    acc = np.concatenate((acc, padding))
 
                 voc_arr.append(voc)
                 acc_arr.append(acc)
@@ -158,10 +185,16 @@ class Network:
             voices = np.array(voc_arr)
             accompaniments = np.array(acc_arr)
 
+            voices = np.reshape(voices, (-1, BATCH_SIZE, 2, FRN_BIN))
+            accompaniments = np.reshape(accompaniments, (-1, BATCH_SIZE, 2, FRN_BIN))
+
             # DataOperation.nn_output_to_wav(data, 'org.wav')
             DataOperation.nn_output_to_wav(voices, 'voice.wav')
             DataOperation.nn_output_to_wav(accompaniments, 'accompaniments.wav')
 
 nn = Network()
-database = Database('train')
-nn.train(database)
+# database = Database('train')
+# nn.train(database, 9)
+
+database2 = Database('test')
+nn.predict_with_model(database2, './model')

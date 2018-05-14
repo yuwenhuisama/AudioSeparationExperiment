@@ -4,8 +4,8 @@ File: /attention-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Thu May 10 2018
-Modified By: huisama
+Last Modified: Monday May 14th 2018 6:27:26 pm
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
