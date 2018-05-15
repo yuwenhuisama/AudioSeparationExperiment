@@ -4,8 +4,8 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Tuesday May 15th 2018 3:01:42 pm
-Modified By: Huisama
+Last Modified: Tue May 15 2018
+Modified By: huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -24,6 +24,8 @@ BATCH_SIZE = 32
 BATCH_SONG_SIZE = 1
 FRN_SAMPLE = 1024
 FRN_BIN = FRN_SAMPLE // 2 + 1
+
+SEG_NUM = 8
 
 class Database(object):
     '''
@@ -74,6 +76,14 @@ class Database(object):
 
         return np.concatenate(result)        
 
+    def release_batch_data(self):
+        tracks = self.raw_tracks[self.batch_index:self.batch_index+self.batch_size]
+
+        for track in tracks:
+            del track.audio
+            del track.targets['vocals'].audio
+            del track.targets['accompaniment'].audio
+
     def generate_batch_data(self, continue_index=0):
         self.batch_index = continue_index
 
@@ -84,18 +94,39 @@ class Database(object):
         self.batch_index += BATCH_SONG_SIZE
         self.batch_index %= 50
 
-        mixture = [track.audio for track in tracks]
-        vocals = [track.targets['vocals'].audio for track in tracks]
-        accompaniments = [track.targets['accompaniment'].audio for track in tracks]
+        self.mixture = [track.audio for track in tracks]
+        self.vocals = [track.targets['vocals'].audio for track in tracks]
+        self.accompaniments = [track.targets['accompaniment'].audio for track in tracks]
 
-        mixture_dataset = self._generate_data_set_for_nn(mixture)
-        vocals_dataset = self._generate_data_set_for_nn(vocals)
-        accompaniments_dataset = self._generate_data_set_for_nn(accompaniments)
+        self.max_seg = SEG_NUM * BATCH_SONG_SIZE
+        self.seg_index = 0
+        # mixture_dataset = self._generate_data_set_for_nn(mixture)
+        # vocals_dataset = self._generate_data_set_for_nn(vocals)
+        # accompaniments_dataset = self._generate_data_set_for_nn(accompaniments)
+        # return mixture_dataset, vocals_dataset, accompaniments_dataset
 
-        return mixture_dataset, vocals_dataset, accompaniments_dataset
+    def get_audio_wave_segment(self, source, segment_index):
+        audio_length = source.shape[0]
+        seg_len = audio_length // SEG_NUM
 
-    def generate_next_batch():
-        pass
+        data = source[segment_index * seg_len : segment_index * (seg_len + 1) if segment_index < SEG_NUM - 1 else audio_length, :, :, :]
+        return data
+
+    def generate_next_batch(self):
+        song_index = self.seg_index // SEG_NUM
+
+        mixture = self.get_audio_wave_segment(self.mixture[song_index], self.seg_index % BATCH_SONG_SIZE)
+        mixture = self._generate_data_set_for_nn([mixture])
+
+        vocals = self.get_audio_wave_segment(self.vocals[song_index], self.seg_index % BATCH_SONG_SIZE)
+        vocals = self._generate_data_set_for_nn([vocals])
+
+        accompaniments = self.get_audio_wave_segment(self.accompaniments[song_index], self.seg_index % BATCH_SONG_SIZE)
+        accompaniments = self._generate_data_set_for_nn([accompaniments])
+
+        self.seg_index += 1
+
+        return mixture, vocals, accompaniments
 
     def generate_one_batch_data_for_test(self, index, flatten = False):
         mixture = [self.raw_tracks[index].audio]

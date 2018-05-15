@@ -3,8 +3,8 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Tuesday May 15th 2018 2:48:19 pm
-Modified By: Huisama
+Last Modified: Tue May 15 2018
+Modified By: huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -143,6 +143,9 @@ class Network:
                                                             })
 
                         print("Turn %s, Epoch %s, Batch %s : loss %s: " % (index, i, j, loss))
+
+                del mixture, vocals, accompaniment
+                database.release_batch_data()
 
                 if index % 2 == 0:
                     self.save_state(sess, './model', continue_index+index)
