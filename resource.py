@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Monday May 14th 2018 9:07:56 pm
+Last Modified: Tuesday May 15th 2018 3:01:42 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -22,7 +22,7 @@ mus = musdb.DB(root_dir="./musdb18")
 
 BATCH_SIZE = 32
 BATCH_SONG_SIZE = 1
-FRN_SAMPLE = 512
+FRN_SAMPLE = 1024
 FRN_BIN = FRN_SAMPLE // 2 + 1
 
 class Database(object):
@@ -93,6 +93,9 @@ class Database(object):
         accompaniments_dataset = self._generate_data_set_for_nn(accompaniments)
 
         return mixture_dataset, vocals_dataset, accompaniments_dataset
+
+    def generate_next_batch():
+        pass
 
     def generate_one_batch_data_for_test(self, index, flatten = False):
         mixture = [self.raw_tracks[index].audio]
