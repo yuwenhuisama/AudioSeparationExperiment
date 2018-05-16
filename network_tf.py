@@ -3,7 +3,7 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Wednesday May 16th 2018 12:41:26 pm
+Last Modified: Wednesday May 16th 2018 10:39:35 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -33,23 +33,18 @@ class Network:
             return:
                 tensor of shape(1024,)
         '''
-        # Input (batch_size, 2, frn_bin)
-        bn = tf.layers.batch_normalization(input)
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(64,2), filters=16, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(32,2), strides=(1,1), filters=32, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(16,2), strides=(2,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(8,2), strides=(4,1), filters=128, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(4,2), strides=(8,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(2,2), strides=(4,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,2), strides=(2,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,2), strides=(1,1), filters=32, padding='same', data_format='channels_first'))
-        
-        flt = tf.layers.flatten(conv)
-        fcn = tf.layers.batch_normalization(tf.layers.dense(flt, units=2048))
-        output = tf.nn.leaky_relu(fcn)
+        # Input (none, databatch_size, batch_size, frn_bin)
+        with tf.variable_scope('encoding_layer', reuse=tf.AUTO_REUSE):
+            bn = tf.layers.batch_normalization(input)
+            # print(bn.shape)
+            flt = tf.layers.flatten(bn)
+            fcn = tf.layers.batch_normalization(tf.layers.dense(flt, units=2048))
+            fcn = tf.nn.leaky_relu(fcn)
+            fcn = tf.layers.batch_normalization(tf.layers.dense(bn, units=2048))
+            output = tf.nn.leaky_relu(fcn)
         return output
 
-    def do_estimate(self, input, lstm_name):
+    def do_estimate(self, input, lstm_name, scope_name):
         '''
             do_estimate(self, input)
 
@@ -59,26 +54,31 @@ class Network:
             return:
                 tensor of shape(2 * frn_bin)
         '''
-        # input (32, 64)
-        attention = Attention(input, input, input, 8, 128)
+        with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
+            # input (32, 64)
+            attention = Attention(input, input, input, 8, 16)
+            attention = tf.reshape(attention, (tf.shape(input)[0],))
 
-        # rnn
-        with tf.variable_scope(lstm_name):
-            rnn_layer = MultiRNNCell([GRUCell(4096) for _ in range(2)])
-            output_rnn, _ = tf.nn.dynamic_rnn(rnn_layer, attention, dtype=tf.float32)            
+            # rnn
+            with tf.variable_scope(lstm_name):
+                rnn_layer = MultiRNNCell([GRUCell(4096) for _ in range(2)])
+                output_rnn, _ = tf.nn.dynamic_rnn(rnn_layer, attention, dtype=tf.float32)
 
-        estm = tf.nn.leaky_relu(
-            tf.layers.batch_normalization(
-                tf.layers.dense(output_rnn, units=4096)))
-        estm = tf.nn.leaky_relu(
-            tf.layers.batch_normalization(
-                tf.layers.dense(attention, units=2048)))
-        output = tf.layers.batch_normalization(
-                tf.layers.dense(estm, units=2 * FRN_BIN))
+            estm = tf.nn.leaky_relu(
+                tf.layers.batch_normalization(
+                    tf.layers.dense(output_rnn, units=4096)))
+            estm = tf.nn.leaky_relu(
+                tf.layers.batch_normalization(
+                    tf.layers.dense(attention, units=1024)))
+            output = tf.layers.batch_normalization(
+                    tf.layers.dense(estm, units=FRN_BIN))
 
-        output = tf.reshape(output, (-1, BATCH_SIZE, 2, FRN_BIN))
+            output = tf.reshape(output, (-1, BATCH_SIZE, FRN_BIN))
 
         return output
+
+    def tf_mask(self, source, target):
+        return source / (source + target + np.finfo(float).eps)
 
     def build_model(self):
         '''
@@ -86,32 +86,51 @@ class Network:
 
             build model
         '''
-        self.input = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
-        self.acc_src = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
-        self.voc_src = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, 2, FRN_BIN))
+        self.input_left = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))
+        self.input_right = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))
+        self.acc_src_left = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))
+        self.acc_src_right = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))        
+        self.voc_src_left = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))
+        self.voc_src_right = tf.placeholder(dtype=tf.float32, shape=(None, BATCH_SIZE, FRN_BIN))
 
         # encode
-        encoded = self.do_encoding(self.input)
+        encoded_left = self.do_encoding(self.input_left)
+        encoded_right = self.do_encoding(self.input_right)
 
         # separate
-        encoded = tf.reshape(encoded, shape=(-1, 32, 64))
-        estm_acc = self.do_estimate(encoded, "gru_1")
-        estm_voc = self.do_estimate(encoded, "gru_2")
+        encoded_left = tf.reshape(encoded_left, shape=(-1, 32, 64))
+        encoded_right = tf.reshape(encoded_right, shape=(-1, 32, 64))
+        
+        estm_acc_left = self.do_estimate(encoded_left, "gru_1", "attention_acc")
+        estm_acc_right = self.do_estimate(encoded_right, "gru_2", "attention_acc")
+        
+        estm_voc_left = self.do_estimate(encoded_left, "gru_1", "attention_voc")
+        estm_voc_right = self.do_estimate(encoded_right, "gru_2", "attention_voc")
 
         # tfmask
-        tfmask_acc = estm_acc / (estm_acc + estm_voc + np.finfo(float).eps) * self.input
-        tfmask_voc = estm_voc / (estm_acc + estm_voc + np.finfo(float).eps) * self.input
+        tm_mask_voc_left = self.tf_mask(estm_voc_left, estm_acc_left) * self.input_left
+        tm_mask_acc_left = self.tf_mask(estm_acc_left, estm_voc_left) * self.input_left
 
-        result_acc = tf.reshape(tfmask_acc, (-1, BATCH_SIZE, 2, FRN_BIN))
-        result_voc = tf.reshape(tfmask_voc, (-1, BATCH_SIZE, 2, FRN_BIN))
+        tm_mask_voc_right = self.tf_mask(estm_voc_right, estm_acc_right) * self.input_right
+        tm_mask_acc_right = self.tf_mask(estm_acc_right, estm_voc_right) * self.input_right
 
-        self.acc = result_acc
-        self.voc = result_voc
+        result_acc_left = tf.reshape(tm_mask_acc_left, (-1, BATCH_SIZE, FRN_BIN))
+        result_voc_left = tf.reshape(tm_mask_voc_left, (-1, BATCH_SIZE, FRN_BIN))
+
+        result_acc_right = tf.reshape(tm_mask_acc_right, (-1, BATCH_SIZE, FRN_BIN))
+        result_voc_right = tf.reshape(tm_mask_voc_right, (-1, BATCH_SIZE, FRN_BIN))
+
+        self.acc_left = result_acc_left
+        self.voc_left = result_voc_left
+        self.acc_right = result_acc_right
+        self.voc_right = result_voc_right
 
     def loss(self):
         # gamma = 0.2
         return tf.reduce_mean(\
-              tf.square(self.acc_src - self.acc) + tf.square(self.voc_src - self.voc))
+              tf.square(self.acc_src_left - self.acc_left) + tf.square(self.voc_src_left - self.voc_left)\
+              + tf.square(self.acc_src_right - self.acc_right) + tf.square(self.voc_src_right - self.voc_right)
+            )
         # - gamma * tf.square(self.voc_src - self.acc) \
         # - gamma * tf.square(self.acc_src - self.voc), name="loss")
 
@@ -134,22 +153,33 @@ class Network:
 
             for index in range(50-continue_index):
                 mixture, vocals, accompaniment = database.generate_batch_data(continue_index+index)
+                mixture_left, mixture_right = mixture
+                vocals_left, vocals_right = vocals
+                accompaniment_left, accompaniment_right = accompaniment
 
-                times = math.ceil(len(mixture) / 32)
+                batch_len = 10
+
+                times = math.ceil(len(mixture) / batch_len)
 
                 for j in range(100):
                     for i in range(times):
 
                         step += 1
 
-                        batch_mixture = mixture[i*32 : (i+1)*32 if (i+1)*32 < len(mixture) else len(mixture), :, :, :]
-                        batch_voc = vocals[i*32 : (i+1)*32 if (i+1)*32 < len(vocals) else len(vocals), :, :, :]
-                        batch_acc = accompaniment[i*32 : (i+1)*32 if (i+1)*32 < len(accompaniment) else len(accompaniment), :, :, :]
+                        batch_mixture_left = mixture_left[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(mixture_left) else len(mixture_left), :, :]
+                        batch_mixture_right = mixture_right[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(mixture_right) else len(mixture_right), :, :]
+                        batch_voc_left = vocals_left[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(vocals_left) else len(vocals_left), :, :]
+                        batch_voc_right = vocals_right[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(vocals_right) else len(vocals_right), :, :]
+                        batch_acc_left = accompaniment_left[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(accompaniment_left) else len(accompaniment_left), :, :]
+                        batch_acc_right = accompaniment_right[i*batch_len : (i+1)*batch_len if (i+1)*batch_len < len(accompaniment_right) else len(accompaniment_right), :, :]
 
                         loss, _, summary = sess.run([loss_fn, optimizer, summary_op], feed_dict={
-                                                                self.acc_src: batch_acc,
-                                                                self.voc_src: batch_voc,
-                                                                self.input: batch_mixture
+                                                                self.acc_src_left: batch_acc_left,
+                                                                self.voc_src_left: batch_voc_left,
+                                                                self.acc_src_right: batch_acc_right,
+                                                                self.voc_src_right: batch_voc_right,
+                                                                self.input_left: batch_mixture_left,
+                                                                self.input_right: batch_mixture_right
                                                             })
 
                         print("Turn %s, Epoch %s, Batch %s : loss %s: " % (index, i, j, loss))
@@ -229,9 +259,12 @@ class Network:
             # tf.summary.histogram(v.name, v)
             # tf.summary.histogram('grad/' + v.name, tf.gradients(loss, v))
         tf.summary.scalar('loss', loss)
-        tf.summary.histogram('x_mixed', self.input)
-        tf.summary.histogram('y_src1', self.voc)
-        tf.summary.histogram('y_src2', self.acc)
+        tf.summary.histogram('mixture_left', self.input_left)
+        tf.summary.histogram('mixture_right', self.input_right)
+        tf.summary.histogram('voc_left', self.voc_left)
+        tf.summary.histogram('voc_right', self.voc_right)
+        tf.summary.histogram('acc_left', self.acc_left)
+        tf.summary.histogram('acc_right', self.acc_right)
         return tf.summary.merge_all()
 
 nn = Network()

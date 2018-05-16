@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Wednesday May 16th 2018 12:58:31 pm
+Last Modified: Wednesday May 16th 2018 9:29:02 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -66,15 +66,20 @@ class Database(object):
             Zxxr_seq = self._generate_padding_data(Zxxr.real)
 
             # Stack
-            stacked = np.stack((Zxxl_seq, Zxxr_seq))
-            stacked = np.transpose(stacked, (1, 0, 2))
+            # stacked = np.stack((Zxxl_seq, Zxxr_seq))
+            # stacked = np.transpose(stacked, (1, 0, 2))
 
             # reshape
-            reshaped = np.reshape(stacked, (-1, BATCH_SIZE, 2, stacked.shape[2]))
+            # reshaped = np.reshape(stacked, (-1, BATCH_SIZE, 2, stacked.shape[2]))
+            reshl = np.reshape(Zxxl_seq, (-1, BATCH_SIZE, Zxxl_seq.shape[1]))
+            reshr = np.reshape(Zxxr_seq, (-1, BATCH_SIZE, Zxxr_seq.shape[1]))
 
-            result.append(reshaped)
+            # result.append(reshaped)
+            result.append((reshl, reshr))
 
-        return np.concatenate(result)        
+        result = list(zip(*result))
+        return (np.concatenate(result[0]), np.concatenate(result[1]))
+        # return np.concatenate(result)
 
     def release_batch_data(self):
         tracks = self.raw_tracks[self.batch_index:self.batch_index+self.batch_size]
