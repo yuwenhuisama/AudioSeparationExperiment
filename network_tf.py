@@ -3,8 +3,8 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Tue May 15 2018
-Modified By: huisama
+Last Modified: Wednesday May 16th 2018 12:41:26 pm
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -18,6 +18,8 @@ from tensorflow.contrib.rnn import GRUCell, MultiRNNCell
 from resource import Database, DataOperation, BATCH_SIZE, FRN_BIN
 from attention_tf import Attention
 import math
+
+import gc
 
 class Network:
 
@@ -33,14 +35,14 @@ class Network:
         '''
         # Input (batch_size, 2, frn_bin)
         bn = tf.layers.batch_normalization(input)
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(64,1), filters=16, padding='same', data_format='channels_first'))
+        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(64,2), filters=16, padding='same', data_format='channels_first'))
         conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(32,2), strides=(1,1), filters=32, padding='same', data_format='channels_first'))
         conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(16,2), strides=(2,1), filters=64, padding='same', data_format='channels_first'))
         conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(8,2), strides=(4,1), filters=128, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(4,1), strides=(8,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(2,1), strides=(4,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,1), strides=(2,1), filters=64, padding='same', data_format='channels_first'))
-        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,1), strides=(1,1), filters=32, padding='same', data_format='channels_first'))
+        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(4,2), strides=(8,1), filters=64, padding='same', data_format='channels_first'))
+        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(2,2), strides=(4,1), filters=64, padding='same', data_format='channels_first'))
+        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,2), strides=(2,1), filters=64, padding='same', data_format='channels_first'))
+        conv = tf.layers.batch_normalization(tf.layers.conv2d(bn, kernel_size=(1,2), strides=(1,1), filters=32, padding='same', data_format='channels_first'))
         
         flt = tf.layers.flatten(conv)
         fcn = tf.layers.batch_normalization(tf.layers.dense(flt, units=2048))
@@ -62,7 +64,7 @@ class Network:
 
         # rnn
         with tf.variable_scope(lstm_name):
-            rnn_layer = MultiRNNCell([GRUCell(4096) for _ in range(1)])
+            rnn_layer = MultiRNNCell([GRUCell(4096) for _ in range(2)])
             output_rnn, _ = tf.nn.dynamic_rnn(rnn_layer, attention, dtype=tf.float32)            
 
         estm = tf.nn.leaky_relu(
@@ -107,12 +109,11 @@ class Network:
         self.voc = result_voc
 
     def loss(self):
-        gamma = 0.2
+        # gamma = 0.2
         return tf.reduce_mean(\
-              tf.square(self.acc_src - self.acc) \
-            + tf.square(self.voc_src - self.voc) \
-            - gamma * tf.square(self.voc_src - self.acc) \
-            - gamma * tf.square(self.acc_src - self.voc), name="loss")
+              tf.square(self.acc_src - self.acc) + tf.square(self.voc_src - self.voc))
+        # - gamma * tf.square(self.voc_src - self.acc) \
+        # - gamma * tf.square(self.acc_src - self.voc), name="loss")
 
     def train(self, database, continue_index=0):
         self.build_model()
@@ -120,23 +121,32 @@ class Network:
         global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
         optimizer = tf.train.AdamOptimizer().minimize(loss_fn, global_step=global_step)
 
+        summary_op = self.summaries(loss_fn)
+
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
 
             self.load_state(sess, './model')
+
+            writer = tf.summary.FileWriter('./graph', sess.graph)
+
+            step = 0
 
             for index in range(50-continue_index):
                 mixture, vocals, accompaniment = database.generate_batch_data(continue_index+index)
 
                 times = math.ceil(len(mixture) / 32)
 
-                for j in range(8):
+                for j in range(100):
                     for i in range(times):
+
+                        step += 1
+
                         batch_mixture = mixture[i*32 : (i+1)*32 if (i+1)*32 < len(mixture) else len(mixture), :, :, :]
                         batch_voc = vocals[i*32 : (i+1)*32 if (i+1)*32 < len(vocals) else len(vocals), :, :, :]
                         batch_acc = accompaniment[i*32 : (i+1)*32 if (i+1)*32 < len(accompaniment) else len(accompaniment), :, :, :]
 
-                        loss, _ = sess.run([loss_fn, optimizer], feed_dict={
+                        loss, _, summary = sess.run([loss_fn, optimizer, summary_op], feed_dict={
                                                                 self.acc_src: batch_acc,
                                                                 self.voc_src: batch_voc,
                                                                 self.input: batch_mixture
@@ -144,11 +154,16 @@ class Network:
 
                         print("Turn %s, Epoch %s, Batch %s : loss %s: " % (index, i, j, loss))
 
+                        writer.add_summary(summary, global_step=step)
+
                 del mixture, vocals, accompaniment
                 database.release_batch_data()
+                gc.collect()
 
                 if index % 2 == 0:
                     self.save_state(sess, './model', continue_index+index)
+                    
+            writer.close()
 
     def save_state(self, sess, ckpt_path, global_step):
         print('Begin saving...')
@@ -180,6 +195,12 @@ class Network:
 
                 acc, voc = sess.run([self.acc, self.voc], feed_dict={self.input: batch_mixture})
 
+                mask_acc = np.abs(acc) / (np.abs(acc) + np.abs(voc) + np.finfo(float).eps)
+                mask_voc = 1. - mask_acc
+
+                voc = batch_mixture * mask_acc
+                acc = batch_mixture * mask_voc
+
                 if (voc.shape[0] < BATCH_SIZE):
                     d = BATCH_SIZE - voc.shape[0]
                     padding = np.zeros((d, BATCH_SIZE, 2, FRN_BIN))
@@ -203,9 +224,19 @@ class Network:
             DataOperation.nn_output_to_wav(voices, 'voice.wav')
             DataOperation.nn_output_to_wav(accompaniments, 'accompaniments.wav')
 
-nn = Network()
-# database = Database('train')
-# nn.train(database, 0)
+    def summaries(self, loss):
+        # for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
+            # tf.summary.histogram(v.name, v)
+            # tf.summary.histogram('grad/' + v.name, tf.gradients(loss, v))
+        tf.summary.scalar('loss', loss)
+        tf.summary.histogram('x_mixed', self.input)
+        tf.summary.histogram('y_src1', self.voc)
+        tf.summary.histogram('y_src2', self.acc)
+        return tf.summary.merge_all()
 
-database2 = Database('train')
-nn.predict_with_model(database2, './model')
+nn = Network()
+database = Database('train')
+nn.train(database, 0)
+
+# database2 = Database('test')
+# nn.predict_with_model(database2, './model')
