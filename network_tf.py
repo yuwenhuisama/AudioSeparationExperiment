@@ -3,8 +3,8 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Wednesday May 16th 2018 10:39:35 pm
-Modified By: Huisama
+Last Modified: Thu May 17 2018
+Modified By: huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -28,10 +28,10 @@ class Network:
             do_encoding(self, input)
 
             parameters:
-            input: tensor of shape (batch_size, 2, frn_bin)
+            input: tensor of shape (-1, batch_size, frn_bin)
 
             return:
-                tensor of shape(1024,)
+                tensor of shape(-1, batch_size, 2048)
         '''
         # Input (none, databatch_size, batch_size, frn_bin)
         with tf.variable_scope('encoding_layer', reuse=tf.AUTO_REUSE):
@@ -40,7 +40,7 @@ class Network:
             flt = tf.layers.flatten(bn)
             fcn = tf.layers.batch_normalization(tf.layers.dense(flt, units=2048))
             fcn = tf.nn.leaky_relu(fcn)
-            fcn = tf.layers.batch_normalization(tf.layers.dense(bn, units=2048))
+            fcn = tf.layers.batch_normalization(tf.layers.dense(bn, units=1024))
             output = tf.nn.leaky_relu(fcn)
         return output
 
@@ -49,15 +49,15 @@ class Network:
             do_estimate(self, input)
 
             parameters:
-            input: tensor of shape (32, 64)
+            input: tensor of shape (-1, batch_size, 1024)
 
             return:
-                tensor of shape(2 * frn_bin)
+                tensor of shape(-1, batch_size, frn_bin)
         '''
         with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
             # input (32, 64)
             attention = Attention(input, input, input, 8, 16)
-            attention = tf.reshape(attention, (tf.shape(input)[0],))
+            # attention = tf.reshape(attention, (tf.shape(input)[0],))
 
             # rnn
             with tf.variable_scope(lstm_name):
@@ -98,8 +98,8 @@ class Network:
         encoded_right = self.do_encoding(self.input_right)
 
         # separate
-        encoded_left = tf.reshape(encoded_left, shape=(-1, 32, 64))
-        encoded_right = tf.reshape(encoded_right, shape=(-1, 32, 64))
+        # encoded_left = tf.reshape(encoded_left, shape=(-1, 32, 64))
+        # encoded_right = tf.reshape(encoded_right, shape=(-1, 32, 64))
         
         estm_acc_left = self.do_estimate(encoded_left, "gru_1", "attention_acc")
         estm_acc_right = self.do_estimate(encoded_right, "gru_2", "attention_acc")
