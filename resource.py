@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Wednesday May 16th 2018 9:29:02 pm
+Last Modified: Thursday May 17th 2018 9:50:21 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -154,5 +154,5 @@ class DataOperation:
 
         DataOperation.data_to_wav(stacked, filepath)
 
-db = Database('sample')
-db.generate_batch_data()
+# db = Database('sample')
+# db.generate_batch_data()

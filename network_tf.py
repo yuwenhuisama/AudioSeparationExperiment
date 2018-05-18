@@ -3,8 +3,8 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Thu May 17 2018
-Modified By: huisama
+Last Modified: Friday May 18th 2018 2:20:50 am
+Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
 '''
@@ -31,49 +31,44 @@ class Network:
             input: tensor of shape (-1, batch_size, frn_bin)
 
             return:
-                tensor of shape(-1, batch_size, 2048)
+                tensor of shape(-1, batch_size, 512)
         '''
         # Input (none, databatch_size, batch_size, frn_bin)
         with tf.variable_scope('encoding_layer', reuse=tf.AUTO_REUSE):
             bn = tf.layers.batch_normalization(input)
             # print(bn.shape)
-            flt = tf.layers.flatten(bn)
-            fcn = tf.layers.batch_normalization(tf.layers.dense(flt, units=2048))
-            fcn = tf.nn.leaky_relu(fcn)
-            fcn = tf.layers.batch_normalization(tf.layers.dense(bn, units=1024))
-            output = tf.nn.leaky_relu(fcn)
-        return output
+            # flt = tf.layers.flatten(bn)
+            fcn = tf.layers.batch_normalization(tf.layers.dense(bn, units=512), name="encoding_dense1")
+            fcn = tf.nn.relu(fcn)
+        return fcn
 
     def do_estimate(self, input, lstm_name, scope_name):
         '''
             do_estimate(self, input)
 
             parameters:
-            input: tensor of shape (-1, batch_size, 1024)
+            input: tensor of shape (-1, batch_size, 512)
 
             return:
                 tensor of shape(-1, batch_size, frn_bin)
         '''
         with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
             # input (32, 64)
-            attention = Attention(input, input, input, 8, 16)
+            # attention = Attention(input, input, input, 8, 16)
             # attention = tf.reshape(attention, (tf.shape(input)[0],))
+            attention = input
 
             # rnn
             with tf.variable_scope(lstm_name):
-                rnn_layer = MultiRNNCell([GRUCell(4096) for _ in range(2)])
+                rnn_layer = MultiRNNCell([GRUCell(512) for _ in range(2)])
                 output_rnn, _ = tf.nn.dynamic_rnn(rnn_layer, attention, dtype=tf.float32)
 
-            estm = tf.nn.leaky_relu(
+            estm = tf.nn.relu(
                 tf.layers.batch_normalization(
-                    tf.layers.dense(output_rnn, units=4096)))
-            estm = tf.nn.leaky_relu(
-                tf.layers.batch_normalization(
-                    tf.layers.dense(attention, units=1024)))
-            output = tf.layers.batch_normalization(
-                    tf.layers.dense(estm, units=FRN_BIN))
+                    tf.layers.dense(output_rnn, units=512, name="estimate_dense1")))
+            output = tf.layers.dense(estm, units=FRN_BIN, name="estiamte_dense2")
 
-            output = tf.reshape(output, (-1, BATCH_SIZE, FRN_BIN))
+            # output = tf.reshape(output, (-1, BATCH_SIZE, FRN_BIN))
 
         return output
 
@@ -96,11 +91,9 @@ class Network:
         # encode
         encoded_left = self.do_encoding(self.input_left)
         encoded_right = self.do_encoding(self.input_right)
-
-        # separate
-        # encoded_left = tf.reshape(encoded_left, shape=(-1, 32, 64))
-        # encoded_right = tf.reshape(encoded_right, shape=(-1, 32, 64))
         
+        # separate
+        # (-1, batch_size, 512)
         estm_acc_left = self.do_estimate(encoded_left, "gru_1", "attention_acc")
         estm_acc_right = self.do_estimate(encoded_right, "gru_2", "attention_acc")
         
@@ -114,16 +107,23 @@ class Network:
         tm_mask_voc_right = self.tf_mask(estm_voc_right, estm_acc_right) * self.input_right
         tm_mask_acc_right = self.tf_mask(estm_acc_right, estm_voc_right) * self.input_right
 
-        result_acc_left = tf.reshape(tm_mask_acc_left, (-1, BATCH_SIZE, FRN_BIN))
-        result_voc_left = tf.reshape(tm_mask_voc_left, (-1, BATCH_SIZE, FRN_BIN))
+        # result_acc_left = tf.reshape(tm_mask_acc_left, (-1, BATCH_SIZE, FRN_BIN))
+        # result_voc_left = tf.reshape(tm_mask_voc_left, (-1, BATCH_SIZE, FRN_BIN))
 
-        result_acc_right = tf.reshape(tm_mask_acc_right, (-1, BATCH_SIZE, FRN_BIN))
-        result_voc_right = tf.reshape(tm_mask_voc_right, (-1, BATCH_SIZE, FRN_BIN))
+        # result_acc_right = tf.reshape(tm_mask_acc_right, (-1, BATCH_SIZE, FRN_BIN))
+        # result_voc_right = tf.reshape(tm_mask_voc_right, (-1, BATCH_SIZE, FRN_BIN))
+
+        result_acc_left = tm_mask_acc_left
+        result_voc_left = tm_mask_voc_left
+        result_acc_right = tm_mask_acc_right
+        result_voc_right = tm_mask_voc_right
 
         self.acc_left = result_acc_left
         self.voc_left = result_voc_left
         self.acc_right = result_acc_right
         self.voc_right = result_voc_right
+
+        # print([x.name for x in tf.global_variables()])
 
     def loss(self):
         # gamma = 0.2
@@ -138,7 +138,8 @@ class Network:
         self.build_model()
         loss_fn = self.loss()
         global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
-        optimizer = tf.train.AdamOptimizer().minimize(loss_fn, global_step=global_step)
+        # optimizer = tf.train.AdamOptimizer().minimize(loss_fn, global_step=global_step)
+        optimizer = tf.train.GradientDescentOptimizer(0.01).minimize(loss_fn, global_step=global_step)
 
         summary_op = self.summaries(loss_fn)
 
@@ -159,7 +160,7 @@ class Network:
 
                 batch_len = 10
 
-                times = math.ceil(len(mixture) / batch_len)
+                times = math.ceil(mixture_left.shape[0] / batch_len)
 
                 for j in range(100):
                     for i in range(times):
