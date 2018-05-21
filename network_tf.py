@@ -3,7 +3,7 @@ File: /network-tf.py
 Created Date: Thursday May 10th 2018
 Author: huisama
 -----
-Last Modified: Friday May 18th 2018 2:20:50 am
+Last Modified: Monday May 21st 2018 2:38:24 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -53,20 +53,18 @@ class Network:
                 tensor of shape(-1, batch_size, frn_bin)
         '''
         with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
-            # input (32, 64)
-            # attention = Attention(input, input, input, 8, 16)
-            # attention = tf.reshape(attention, (tf.shape(input)[0],))
-            attention = input
+            attention = Attention(input, input, input, 8, 16)
+            # attention = input
 
             # rnn
-            with tf.variable_scope(lstm_name):
-                rnn_layer = MultiRNNCell([GRUCell(512) for _ in range(2)])
+            with tf.variable_scope(lstm_name, reuse=tf.AUTO_REUSE):
+                rnn_layer = MultiRNNCell([GRUCell(512) for _ in range(3)])
                 output_rnn, _ = tf.nn.dynamic_rnn(rnn_layer, attention, dtype=tf.float32)
 
             estm = tf.nn.relu(
                 tf.layers.batch_normalization(
-                    tf.layers.dense(output_rnn, units=512, name="estimate_dense1")))
-            output = tf.layers.dense(estm, units=FRN_BIN, name="estiamte_dense2")
+                    tf.layers.dense(output_rnn, units=512)))
+            output = tf.layers.dense(estm, units=FRN_BIN)
 
             # output = tf.reshape(output, (-1, BATCH_SIZE, FRN_BIN))
 
@@ -107,12 +105,6 @@ class Network:
         tm_mask_voc_right = self.tf_mask(estm_voc_right, estm_acc_right) * self.input_right
         tm_mask_acc_right = self.tf_mask(estm_acc_right, estm_voc_right) * self.input_right
 
-        # result_acc_left = tf.reshape(tm_mask_acc_left, (-1, BATCH_SIZE, FRN_BIN))
-        # result_voc_left = tf.reshape(tm_mask_voc_left, (-1, BATCH_SIZE, FRN_BIN))
-
-        # result_acc_right = tf.reshape(tm_mask_acc_right, (-1, BATCH_SIZE, FRN_BIN))
-        # result_voc_right = tf.reshape(tm_mask_voc_right, (-1, BATCH_SIZE, FRN_BIN))
-
         result_acc_left = tm_mask_acc_left
         result_voc_left = tm_mask_voc_left
         result_acc_right = tm_mask_acc_right
@@ -122,8 +114,6 @@ class Network:
         self.voc_left = result_voc_left
         self.acc_right = result_acc_right
         self.voc_right = result_voc_right
-
-        # print([x.name for x in tf.global_variables()])
 
     def loss(self):
         # gamma = 0.2
@@ -139,7 +129,8 @@ class Network:
         loss_fn = self.loss()
         global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
         # optimizer = tf.train.AdamOptimizer().minimize(loss_fn, global_step=global_step)
-        optimizer = tf.train.GradientDescentOptimizer(0.01).minimize(loss_fn, global_step=global_step)
+        # optimizer = tf.train.GradientDescentOptimizer(0.01).minimize(loss_fn, global_step=global_step)
+        optimizer = tf.train.AdagradOptimizer(learning_rate=0.1).minimize(loss_fn, global_step=global_step)
 
         summary_op = self.summaries(loss_fn)
 
@@ -152,17 +143,17 @@ class Network:
 
             step = 0
 
-            for index in range(50-continue_index):
+            for index in range(200):
                 mixture, vocals, accompaniment = database.generate_batch_data(continue_index+index)
                 mixture_left, mixture_right = mixture
                 vocals_left, vocals_right = vocals
                 accompaniment_left, accompaniment_right = accompaniment
 
-                batch_len = 10
+                batch_len = 16
 
                 times = math.ceil(mixture_left.shape[0] / batch_len)
 
-                for j in range(100):
+                for j in range(8):
                     for i in range(times):
 
                         step += 1
@@ -191,7 +182,7 @@ class Network:
                 database.release_batch_data()
                 gc.collect()
 
-                if index % 2 == 0:
+                if index % 10 == 0:
                     self.save_state(sess, './model', continue_index+index)
                     
             writer.close()
@@ -209,7 +200,7 @@ class Network:
 
     def predict_with_model(self, database, model_path):
         self.build_model()
-        data = database.generate_one_batch_data_for_test(0)
+        data, phase_left, phase_right = database.generate_one_batch_data_for_test(0)
         # global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')  
 
         with tf.Session() as sess:
@@ -217,43 +208,93 @@ class Network:
 
             self.load_state(sess, model_path)
             
-            voc_arr = []
-            acc_arr = []
+            voc_left_arr = []
+            voc_right_arr = []
+            acc_left_arr = []
+            acc_right_arr = []
 
-            times = math.ceil(len(data) / 32)
+            times = math.ceil(len(data[0]) / 32)
             for i in range(times):
-                batch_mixture = np.array(data[i*32 : (i+1)*32 if (i+1)*32 < len(data) else len(data), :, :, :])
+                batch_mixture_left = np.array(data[0][i*32 : (i+1)*32 if (i+1)*32 < len(data[0]) else len(data[0]), :, :])
+                batch_mixture_right = np.array(data[1][i*32 : (i+1)*32 if (i+1)*32 < len(data[0]) else len(data[0]), :, :])
 
-                acc, voc = sess.run([self.acc, self.voc], feed_dict={self.input: batch_mixture})
+                batch_phase_left = np.array(phase_left[i*32 : (i+1)*32 if (i+1)*32 < len(phase_left) else len(phase_left), :, :])
+                batch_phase_right = np.array(phase_right[i*32 : (i+1)*32 if (i+1)*32 < len(phase_right) else len(phase_right), :, :])
 
-                mask_acc = np.abs(acc) / (np.abs(acc) + np.abs(voc) + np.finfo(float).eps)
-                mask_voc = 1. - mask_acc
+                acc_left, acc_right, voc_left, voc_right = sess.run([self.acc_left, self.acc_right, self.voc_left, self.voc_right], 
+                                feed_dict={
+                                    self.input_left: batch_mixture_left, 
+                                    self.input_right: batch_mixture_right
+                                    })
 
-                voc = batch_mixture * mask_acc
-                acc = batch_mixture * mask_voc
+                mask_acc_left = np.abs(acc_left) / (np.abs(acc_left) + np.abs(voc_left) + np.finfo(float).eps)
+                mask_voc_left = 1. - mask_acc_left
 
-                if (voc.shape[0] < BATCH_SIZE):
-                    d = BATCH_SIZE - voc.shape[0]
-                    padding = np.zeros((d, BATCH_SIZE, 2, FRN_BIN))
-                    voc = np.concatenate((voc, padding))
+                mask_acc_right = np.abs(acc_right) / (np.abs(acc_right) + np.abs(voc_right) + np.finfo(float).eps)
+                mask_voc_right = 1. - mask_acc_right
 
-                if (acc.shape[0] < BATCH_SIZE):
-                    d = BATCH_SIZE - acc.shape[0]
-                    padding = np.zeros((d, BATCH_SIZE, 2, FRN_BIN))
-                    acc = np.concatenate((acc, padding))
+                acc_left = batch_mixture_left * mask_acc_left
+                acc_right = batch_mixture_right * mask_acc_right
 
-                voc_arr.append(voc)
-                acc_arr.append(acc)
+                voc_left = batch_mixture_left * mask_voc_left
+                voc_right = batch_mixture_right * mask_voc_right
+
+                acc_left = acc_left * np.exp(1.j * batch_phase_left)
+                acc_right = acc_right * np.exp(1.j * batch_phase_right)
+
+                voc_left = voc_left * np.exp(1.j * batch_phase_left)
+                voc_right = voc_right * np.exp(1.j * batch_phase_right)
+
+                if (voc_left.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - voc_left.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, FRN_BIN))
+                    voc_left = np.concatenate((voc_left, padding))
+
+                if (voc_right.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - voc_right.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, FRN_BIN))
+                    voc_right = np.concatenate((voc_right, padding))
+
+                if (acc_left.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - acc_left.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, FRN_BIN))
+                    acc_left = np.concatenate((acc_left, padding))
+
+                if (acc_right.shape[0] < BATCH_SIZE):
+                    d = BATCH_SIZE - acc_right.shape[0]
+                    padding = np.zeros((d, BATCH_SIZE, FRN_BIN))
+                    acc_right = np.concatenate((acc_right, padding))
+
+                voc_left_arr.append(voc_left)
+                acc_left_arr.append(acc_left)
+                voc_right_arr.append(voc_right)
+                acc_right_arr.append(acc_right)
+
+            voices_left = np.array(voc_left_arr)
+            voices_right = np.array(voc_right_arr)
             
-            voices = np.array(voc_arr)
-            accompaniments = np.array(acc_arr)
+            accompaniments_left = np.array(acc_left_arr)
+            accompaniments_right = np.array(acc_right_arr)
 
-            voices = np.reshape(voices, (-1, BATCH_SIZE, 2, FRN_BIN))
-            accompaniments = np.reshape(accompaniments, (-1, BATCH_SIZE, 2, FRN_BIN))
+            voices_left = np.reshape(voices_left, (-1, BATCH_SIZE, FRN_BIN))
+            voices_right = np.reshape(voices_right, (-1, BATCH_SIZE, FRN_BIN))
+
+            accompaniments_left = np.reshape(accompaniments_left, (-1, BATCH_SIZE, FRN_BIN))
+            accompaniments_right = np.reshape(accompaniments_right, (-1, BATCH_SIZE, FRN_BIN))
+
+            voices = np.array([voices_left, voices_right])
+            accompaniment = np.array([accompaniments_left, accompaniments_right])
+
+            # 2, 576, 32, 513
+            voices = np.transpose(voices, (1, 2, 0, 3))
+            accompaniment = np.transpose(accompaniment, (1, 2, 0, 3))
+
+            # voices = np.reshape(voices, (-1, BATCH_SIZE, 2, FRN_BIN))
+            # accompaniments = np.reshape(accompaniments, (-1, BATCH_SIZE, 2, FRN_BIN))
 
             # DataOperation.nn_output_to_wav(data, 'org.wav')
-            DataOperation.nn_output_to_wav(voices, 'voice.wav')
-            DataOperation.nn_output_to_wav(accompaniments, 'accompaniments.wav')
+            DataOperation.nn_output_to_wav(voices, 'voice.wav', phase_left, phase_right)
+            DataOperation.nn_output_to_wav(accompaniment, 'accompaniment.wav', phase_left, phase_right)
 
     def summaries(self, loss):
         # for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
@@ -269,8 +310,8 @@ class Network:
         return tf.summary.merge_all()
 
 nn = Network()
-database = Database('train')
-nn.train(database, 0)
+# database = Database('train')
+# nn.train(database)
 
-# database2 = Database('test')
-# nn.predict_with_model(database2, './model')
+database2 = Database('test')
+nn.predict_with_model(database2, './model')

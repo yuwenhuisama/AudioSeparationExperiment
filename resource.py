@@ -4,7 +4,7 @@ Project: AudioSourceSeparation
 Created Date: Tuesday April 24th 2018
 Author: Huisama
 -----
-Last Modified: Thursday May 17th 2018 9:50:21 pm
+Last Modified: Monday May 21st 2018 2:37:41 pm
 Modified By: Huisama
 -----
 Copyright (c) 2018 Hui
@@ -62,8 +62,8 @@ class Database(object):
             _, _, Zxxr = stft(x=right, fs=0.1, nperseg=FRN_SAMPLE)
 
             # Padding
-            Zxxl_seq = self._generate_padding_data(Zxxl.real)
-            Zxxr_seq = self._generate_padding_data(Zxxr.real)
+            Zxxl_seq = self._generate_padding_data(Zxxl)
+            Zxxr_seq = self._generate_padding_data(Zxxr)
 
             # Stack
             # stacked = np.stack((Zxxl_seq, Zxxr_seq))
@@ -91,6 +91,7 @@ class Database(object):
 
     def generate_batch_data(self, continue_index=0):
         self.batch_index = continue_index
+        self.batch_index = self.batch_index % 50
 
         tracks = self.raw_tracks[self.batch_index:self.batch_index+self.batch_size]
 
@@ -111,7 +112,7 @@ class Database(object):
         mixture_dataset = self._generate_data_set_for_nn(self.mixture)
         vocals_dataset = self._generate_data_set_for_nn(self.vocals)
         accompaniments_dataset = self._generate_data_set_for_nn(self.accompaniments)
-        return mixture_dataset, vocals_dataset, accompaniments_dataset
+        return np.abs(mixture_dataset), np.abs(vocals_dataset), np.abs(accompaniments_dataset)
 
     def get_audio_wave_segment(self, source, segment_index):
         audio_length = source.shape[0]
@@ -126,7 +127,7 @@ class Database(object):
         # vocals_dataset = self._generate_data_set_for_nn(mixture)
         # accompaniments_dataset = self._generate_data_set_for_nn(mixture)
 
-        return mixture_dataset #, vocals_dataset, accompaniments_dataset
+        return np.abs(mixture_dataset), np.angle(mixture_dataset[0]), np.angle(mixture_dataset[1]) #, vocals_dataset, accompaniments_dataset
 
 class DataOperation:
     @classmethod
@@ -140,7 +141,7 @@ class DataOperation:
         return data
 
     @classmethod
-    def nn_output_to_wav(cls, data, filepath):
+    def nn_output_to_wav(cls, data, filepath, phase_left, phase_right):
         result = cls.reformat_data(data)
 
         left = result[0, :, :]
@@ -149,7 +150,7 @@ class DataOperation:
         isftslr = istft(Zxx=left, fs=0.1, nperseg=FRN_SAMPLE)
         isftsrr = istft(Zxx=right, fs=0.1, nperseg=FRN_SAMPLE)
 
-        stacked = np.stack((isftslr[1].real, isftsrr[1].real))
+        stacked = np.stack((isftslr[1], isftsrr[1]))
         stacked = np.transpose(stacked, (1, 0))
 
         DataOperation.data_to_wav(stacked, filepath)
